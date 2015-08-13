@@ -18,7 +18,7 @@ struct cpu {
   unsigned char gfx[W * H], keys[16], wait_key;
 };
 
-unsigned char chip8_fontset[80] =
+unsigned char fonts[80] =
   { 
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
     0x20, 0x60, 0x20, 0x20, 0x70, // 1
@@ -40,9 +40,8 @@ unsigned char chip8_fontset[80] =
 
 void font_init (struct cpu* cpu)
 {
-  int i;
-  for (i=0; i<80; i++)
-    cpu->mem[i] = chip8_fontset[i];
+  for (int i=0; i<80; i++)
+    cpu->mem[i] = fonts[i];
 }
 
 void cpu_init (struct cpu* cpu)
@@ -54,14 +53,13 @@ void cpu_init (struct cpu* cpu)
   cpu->ST = 0;
   cpu->wait_key = 0;
 
-  int i;
-  for(i=0;i<0x1000;i++)
+  for(int i=0;i<0x1000;i++)
     cpu->mem[i] = 0;
 
-  for(i=0;i<H*W;i++)
+  for(int i=0;i<H*W;i++)
     cpu->gfx[i] = 0;
 
-  for(i=0;i<16;i++) {
+  for(int i=0;i<16;i++) {
     cpu->V[i] = 0;
     cpu->stack[i] = 0;
     cpu->keys[i] = 0;
@@ -73,169 +71,110 @@ void load (const char* filename, struct cpu* cpu)
 {
   unsigned short pos = 0x200;
   FILE *fp = fopen(filename, "r");
-  fread(&(cpu->mem[pos++ & 0xFFF]), sizeof(unsigned char), 0x1000-0x200, fp);
+  fread( &(cpu->mem[pos++ & 0xFFF]), sizeof(unsigned char), 0x1000-0x200, fp);
   fclose(fp);
 }
 
-
+#define params struct cpu* cpu, unsigned short op, unsigned short nnn, unsigned short n, unsigned short x, unsigned short y, unsigned short kk
 /* Instructions */
-void cls (struct cpu* cpu, unsigned short opcode) { int i; for (i=0; i< W*H; i++) { cpu->gfx[i] = 0; } }
-void ret (struct cpu* cpu, unsigned short opcode) { cpu->PC = cpu->stack[cpu->SP--]; }
-void jp_addr (struct cpu* cpu, unsigned short opcode) { cpu->PC = (opcode & 0x0fff); }
-void call_addr (struct cpu* cpu, unsigned short opcode) { cpu->stack[++cpu->SP] = cpu->PC; cpu->PC = (opcode & 0x0fff); }
-void se_vx_byte (struct cpu* cpu, unsigned short opcode) { if (cpu->V[(opcode & 0x0f00) >> 8] == (opcode & 0x00ff)) {cpu->PC+=2;} }
-void sne_vx_byte (struct cpu* cpu, unsigned short opcode) { if (cpu->V[(opcode & 0x0f00) >> 8] != (opcode & 0x00ff)) {cpu->PC+=2;} }
-void se_vx_vy (struct cpu* cpu, unsigned short opcode) { if (cpu->V[(opcode & 0x0f00) >> 8] == cpu->V[(opcode & 0x00f0) >> 4]) {cpu->PC+=2;} }
-void ld_vx_byte (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = (opcode & 0x00ff); }
-void add_vx_k (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] + (opcode & 0x00ff); }
-void sne_vx_vy (struct cpu* cpu, unsigned short opcode) { if (cpu->V[(opcode & 0x0f00) >> 8] != cpu->V[(opcode & 0x00f0) >> 4]) {cpu->PC+=2;} }
-void ld_I_addr (struct cpu* cpu, unsigned short opcode) { cpu->I = (opcode & 0x0fff); }
-void jp_v0_addr (struct cpu* cpu, unsigned short opcode) { cpu->PC = (opcode & 0x0fff) + cpu->V[0]; }
-void rnd (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = (rand() % 255) & (opcode & 0x00ff); }
-void drw (struct cpu* cpu, unsigned short opcode)
+void cls       (params) { for (int i=0; i< W*H; i++) { cpu->gfx[i] = 0; } }
+void ret       (params) { cpu->PC = cpu->stack[cpu->SP--]; }
+void jp_nnn    (params) { cpu->PC = nnn; }
+void call_nnn  (params) { cpu->stack[++cpu->SP] = cpu->PC; cpu->PC = nnn; }
+void se_vx_kk  (params) { if (cpu->V[x] == kk) cpu->PC += 2; }
+void sne_vx_kk (params) { if (cpu->V[x] != kk) cpu->PC += 2; }
+void se_vx_vy  (params) { if (cpu->V[x] == cpu->V[y]) cpu->PC += 2; }
+void ld_vx_kk  (params) { cpu->V[x]  = kk; }
+void add_vx_kk (params) { cpu->V[x] += kk; }
+void sne_vx_vy (params) { if (cpu->V[x] != cpu->V[y]) cpu->PC += 2; }
+void ld_I_nnn  (params) { cpu->I  = nnn; }
+void jp_v0_nnn (params) { cpu->PC = nnn + cpu->V[0]; }
+void rnd       (params) { cpu->V[x]  = (rand() % 255) & kk; }
+void ld_vx_vy  (params) { cpu->V[x]  = cpu->V[y]; }
+void or        (params) { cpu->V[x] |= cpu->V[y]; }
+void and       (params) { cpu->V[x] &= cpu->V[y]; }
+void xor       (params) { cpu->V[x] ^= cpu->V[y]; }
+void addc      (params) { unsigned short tmp = cpu->V[x] + cpu->V[y]; cpu->V[0xF] = (tmp>0xFF) ? 1 : 0;cpu->V[x] = tmp & 0xFF; }
+void subb      (params) { cpu->V[0xF] = ( cpu->V[x] > cpu->V[y] ) ? 1 : 0; cpu->V[x] -= cpu->V[y]; }
+void shr       (params) { cpu->V[0xF] = ( cpu->V[x] & 1 ); cpu->V[x] >>= 1; }
+void subnb     (params) { cpu->V[0xF] = ( cpu->V[y] > cpu->V[x] ) ? 1 : 0; cpu->V[x] = cpu->V[y] - cpu->V[x]; }
+void shl       (params) { cpu-> V[0xF] = cpu->V[x >> 3]; cpu->V[x] <<= 1; }
+void skp_vx    (params) { if (   cpu->keys[ cpu->V[x] ] )  cpu->PC+=2; }
+void sknp_vx   (params) { if (! (cpu->keys[ cpu->V[x] ]) ) cpu->PC+=2; }
+void ld_vx_dt  (params) { cpu->V[x] = cpu->DT; }
+void ld_vx_k   (params) { cpu->wait_key = x | 0x80; }
+void ld_dt_vx  (params) { cpu->DT = cpu->V[x]; }
+void ld_st_vx  (params) { cpu->ST = cpu->V[x]; }
+void add_i_vx  (params) { cpu->I += cpu->V[x]; }
+void ld_f_vx   (params) { cpu->I  = cpu->V[x] * 5; } /* Fonts are 5 bytes, *5 is the offset. */
+void bcd       (params) { cpu->mem[cpu->I] = cpu->V[x] / 100; cpu->mem[cpu->I+1] = (cpu->V[x] % 100) / 10; cpu->mem[cpu->I+2] = cpu->V[x] % 10; }
+void store_reg (params) { for (int i=0; i<=x; i++) { cpu->mem[cpu->I + i] = cpu->V[i]; } }
+void read_reg  (params) { for (int i=0; i<=x; i++) { cpu->V[i] = cpu->mem[cpu->I + i]; } }
+void drw       (params)
 {
-  unsigned short x = cpu->V[(opcode & 0x0F00) >> 8], y = cpu->V[(opcode & 0x00F0) >> 4];
-  unsigned short height = opcode & 0x000F, pixel; int xline, yline;
+  unsigned short xcoord = cpu->V[x], ycoord = cpu->V[y];
+  unsigned short height = n, pixel; int xline, yline;
   cpu->V[0xF] = 0;
   for (yline = 0; yline < height; yline++) {
       pixel = cpu->mem[cpu->I + yline];
       for (xline = 0; xline < 8; xline++) {
 	  if ((pixel & (0x80 >> xline)) != 0) {
-	      if (cpu->gfx[(x + xline + ((y + yline) * 64))] == 1)
+	      if (cpu->gfx[(xcoord + xline + ((ycoord + yline) * 64))] == 1)
 		cpu->V[0xF] = 1;                                 
-	      cpu->gfx[x + xline + ((y + yline) * 64)] ^= 1;
+	      cpu->gfx[xcoord + xline + ((ycoord + yline) * 64)] ^= 1;
 	    }
 	}
     }
 }
 
+void (*zero_table[2]) (params) = { cls, ret };
+void (*alu_table[9])  (params) = { ld_vx_vy, or, and, xor, addc, subb, shr, subnb, shl };
+void (*e_table[2])    (params) = { skp_vx, sknp_vx };
+void (*f_table[9])    (params) = { ld_vx_dt, ld_vx_k, ld_dt_vx, ld_st_vx, add_i_vx, ld_f_vx, bcd, store_reg, read_reg };
 
-/* ALU Instructions */
-void ld_vx_vy (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x00f0) >> 4]; }
-void or (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] | cpu->V[(opcode & 0x00f0) >> 4]; }
-void and (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] & cpu->V[(opcode & 0x00f0) >> 4]; }
-void xor (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] ^ cpu->V[(opcode & 0x00f0) >> 4]; }
-void addc (struct cpu* cpu, unsigned short opcode) {
-  unsigned short tmp = cpu->V[(opcode & 0x0f00) >> 8] + cpu->V[(opcode & 0x00f0) >> 4];
-  if ( tmp > 255 )
-    cpu->V[0xf] = 1;
-  else
-    cpu->V[0xf] = 0;
-
-  cpu->V[(opcode & 0x0f00) >> 8] = (tmp & 0x00ff);
-}
-void subb (struct cpu* cpu, unsigned short opcode)
+void zero (params) { zero_table[(n) ? 1 : 0] (cpu, op, nnn, n, x, y, kk); }
+void alu  (params) { alu_table[ ((n)==0xe) ? 8 : (n) ] (cpu, op, nnn, n, x, y, kk); }
+void e    (params) { e_table[ ((n)==0xe) ? 0 : (n) ] (cpu, op, nnn, n, x, y, kk); }
+void f    (params)
 {
-  if ( cpu->V[(opcode & 0x0f00) >> 8] > cpu->V[(opcode & 0x00f0) >> 4] )
-    cpu->V[0xf] = 1;
-  else
-    cpu->V[0xf] = 0;
-
-  cpu->V[(opcode & 0x0f00) >> 8] -= cpu->V[(opcode & 0x00f0) >> 4];
-}
-void shr (struct cpu* cpu, unsigned short opcode) 
-{ 
-  cpu->V[0xf] = ( cpu->V[(opcode & 0x0f00) >> 8] & 1 ); 
-  cpu->V[(opcode & 0x0f00) >> 8] >>= 1; 
-}
-void subnb (struct cpu* cpu, unsigned short opcode)
-{
-  if ( cpu->V[(opcode & 0x00f0) >> 4] > cpu->V[(opcode & 0x0f00) >> 8] )
-    cpu->V[0xf] = 1;
-  else 
-    cpu->V[0xf] = 0;
-
-  cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x00f0) >> 4] - cpu->V[(opcode & 0x0f00) >> 8];
-}
-void shl (struct cpu* cpu, unsigned short opcode)
-{
-  cpu-> V[0xf] = cpu->V[(opcode & 0x0f00) >> 11];
-  cpu->V[(opcode & 0x0f00) >> 8] <<= 1;
-}
-/* End ALU */
-
-
-/* e Instructions */
-void skp_vx (struct cpu* cpu, unsigned short opcode) 
-{ 
-  if ( cpu->keys[ cpu->V[(opcode & 0x0F00) >> 8] ] )
-    cpu->PC+=2;
-}
-void sknp_vx (struct cpu* cpu, unsigned short opcode)
-{
-  if (! (cpu->keys[ cpu->V[(opcode & 0x0F00) >> 8] ]) )
-    cpu->PC+=2;
-}
-/* End e */
-
-
-/* f Instructions */
-void ld_vx_dt (struct cpu* cpu, unsigned short opcode) { cpu->V[(opcode & 0x0f00) >> 8] = cpu->DT; }
-void ld_vx_k (struct cpu* cpu, unsigned short opcode) { cpu->wait_key = ((opcode & 0x0f00) >> 8 ) | 0x80; }
-void ld_dt_vx (struct cpu* cpu, unsigned short opcode) { cpu->DT = cpu->V[(opcode & 0x0f00) >> 8]; }
-void ld_st_vx (struct cpu* cpu, unsigned short opcode) { cpu->ST = cpu->V[(opcode & 0x0f00) >> 8]; }
-void add_i_vx (struct cpu* cpu, unsigned short opcode) { cpu->I += cpu->V[(opcode & 0x0f00) >> 8]; }
-/* Fonts start at address 0x0000 and occupy 5 bytes, so *5 is for the offset. */
-void ld_f_vx (struct cpu* cpu, unsigned short opcode) { cpu->I = cpu->V[(opcode & 0x0f00) >> 8] * 5; }
-void bcd (struct cpu* cpu, unsigned short opcode) 
-{ 
-  cpu->mem[cpu->I] = cpu->V[(opcode & 0x0f00) >> 8] / 100;
-  cpu->mem[cpu->I+1] = ( cpu->V[(opcode & 0x0f00) >> 8] % 100 ) / 10;
-  cpu->mem[cpu->I+2] = cpu->V[(opcode & 0x0f00) >> 8] % 10;
-}
-void store_reg (struct cpu* cpu, unsigned short opcode)
-{
-  for (int i=0; i <= ((opcode & 0x0f00) >> 8 ); i++)
-    cpu->mem[cpu->I + i] = cpu->V[i];
-}
-void read_reg (struct cpu* cpu, unsigned short opcode) 
-{
-  for (int i=0; i<=((opcode & 0x0f00) >> 8); i++)
-    cpu->V[i] = cpu->mem[cpu->I + i]; 
-}
-/* End 0xF */	    
-
-
-void nop (struct cpu* cpu, unsigned short opcode) { printf("nop!\n\a"); }
-
-void (*zero_table[2])(struct cpu*, unsigned short) = { cls, ret };
-void zero (struct cpu* cpu, unsigned short opcode) { zero_table[(opcode&0xf) ? 1 : 0] (cpu, opcode); }
-
-void (*alu_table[9])(struct cpu*, unsigned short) = { ld_vx_vy, or, and, xor, addc, subb, shr, subnb, shl };
-void alu (struct cpu* cpu, unsigned short opcode) { alu_table[ ((opcode&0xf)==0xe) ? 8 : (opcode&0xf) ] (cpu, opcode); }
-
-/* e() had a bug; fixed with parens around (opcode&0xf)==0xe */
-void (*e_table[2])(struct cpu*, unsigned short) = { skp_vx, sknp_vx };
-void e (struct cpu* cpu, unsigned short opcode) { e_table[ ((opcode&0xf)==0xe) ? 0 : (opcode&0xf) ] (cpu, opcode); }
-
-void (*f_table[9])(struct cpu*, unsigned short) = { ld_vx_dt, ld_vx_k, ld_dt_vx, ld_st_vx, add_i_vx, ld_f_vx, bcd, store_reg, read_reg };
-void f (struct cpu* cpu, unsigned short opcode)
-{
-  switch (opcode & 0x00ff)
+  int foo;
+  switch (kk)
     {
-    case 0x0007: f_table[0] (cpu, opcode); break;
-    case 0x000a: f_table[1] (cpu, opcode); break;
-    case 0x0015: f_table[2] (cpu, opcode); break;
-    case 0x0018: f_table[3] (cpu, opcode); break;
-    case 0x001e: f_table[4] (cpu, opcode); break;
-    case 0x0029: f_table[5] (cpu, opcode); break;
-    case 0x0033: f_table[6] (cpu, opcode); break;
-    case 0x0055: f_table[7] (cpu, opcode); break;
-    case 0x0065: f_table[8] (cpu, opcode); break;
+    case 0x0007: foo=0; break;
+    case 0x000a: foo=1; break;
+    case 0x0015: foo=2; break;
+    case 0x0018: foo=3; break;
+    case 0x001e: foo=4; break;
+    case 0x0029: foo=5; break;
+    case 0x0033: foo=6; break;
+    case 0x0055: foo=7; break;
+    case 0x0065: foo=8; break;
     }
+  f_table[foo] (cpu, op, nnn, n, x, y, kk);
 }
 
-void (*chip8_table[16])(struct cpu*, unsigned short) =
+void (*chip8_table[16]) (params) =
 {
-  zero, jp_addr, call_addr, se_vx_byte, sne_vx_byte, se_vx_vy, ld_vx_byte, add_vx_k, alu, sne_vx_vy, ld_I_addr, jp_v0_addr, rnd, drw, e, f
+  zero, jp_nnn, call_nnn, se_vx_kk, sne_vx_kk, se_vx_vy, ld_vx_kk, add_vx_kk, alu, sne_vx_vy, ld_I_nnn, jp_v0_nnn, rnd, drw, e, f
 };
+
 
 void exec (struct cpu* cpu)
 {
-  unsigned short opcode = (cpu->mem[cpu->PC] << 8) | (cpu->mem[cpu->PC+1]);
-  cpu->PC+=2; 
-  chip8_table[(opcode & 0xf000)>>12] (cpu, opcode);
+  unsigned short ins = (cpu->mem[cpu->PC] << 8) | (cpu->mem[cpu->PC+1]);
+  cpu->PC += 2; 
+
+  unsigned short op  = (ins >>12) & 0xF;
+  unsigned short nnn = (ins >> 0) & 0xFFF;
+  unsigned short n   = (ins >> 0) & 0xF;
+  unsigned short x   = (ins >> 8) & 0xF;  
+  unsigned short y   = (ins >> 4) & 0xF;
+  unsigned short kk  = (ins >> 0) & 0xFF;
+
+  chip8_table[op] (cpu, op, nnn, n, x, y, kk);
 }
+
+#undef params
 
 int main (int argc, char** argv)
 {
