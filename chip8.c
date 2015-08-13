@@ -1,21 +1,21 @@
 #include <stdlib.h> /* for rand() */
 #include <SDL.h>
-#include <fstream>
-#include <unistd.h>
+#include <time.h>
+#include <math.h>
+#include <sys/sysinfo.h>
+#include <stddef.h>
 
 #define W 64
 #define H 32
 
-unsigned char mem[0x1000];
-unsigned char V[16];
-unsigned short I, PC, SP, stack[16];
-unsigned char DT, ST; /* Delay Timer, Sound Timer */
+struct cpu {
+  unsigned char mem[0x1000], V[16];
+  unsigned short stack[16];
+  unsigned short I, PC, SP;
+  unsigned char DT, ST; /* Delay Timer, Sound Timer */
+  unsigned char gfx[W * H], keys[16], wait_key;
+};
 
-unsigned short opcode;
-
-unsigned char gfx[W * H];
-unsigned char draw;
-unsigned char keys[16];
 unsigned char chip8_fontset[80] =
   { 
     0xF0, 0x90, 0x90, 0x90, 0xF0, // 0
@@ -37,29 +37,50 @@ unsigned char chip8_fontset[80] =
   };
 
 
-void font ()
+void font (struct cpu* cpu)
 {
   int i;
   for (i=0; i<80; i++)
-      mem[i] = chip8_fontset[i];
+    cpu->mem[i] = chip8_fontset[i];
 }
 
-void reset_keys (unsigned char** keys) {
+void cpu_init(struct cpu* cpu)
+{
+  cpu->PC = 0x200;
+  cpu->I = 0;
+  cpu->SP = 0;
+  cpu->DT = 0;
+  cpu->ST = 0;
+  cpu->wait_key = 0;
+
   int i;
-  for (i=0; i<16; i++)
-    keys[i] = 0;
+  for(i=0;i<0x1000;i++)
+    cpu->mem[i] = 0;
+
+  for(i=0;i<H*W;i++)
+    cpu->gfx[i] = 0;
+
+  for(i=0;i<16;i++) {
+    cpu->V[i] = 0;
+    cpu->stack[i] = 0;
+    cpu->keys[i] = 0;
+  }
+  font(cpu);
 }
 
-void load(const char* filename, unsigned pos = 0x200)
+void load(const char* filename, struct cpu* cpu)
 {
-  for(std::ifstream f(filename, std::ios::binary); f.good(); )
-    mem[pos++ & 0xFFF] = f.get();
+  unsigned short pos = 0x200;
+  FILE *fp = fopen(filename, "r");
+  fread(&(cpu->mem[pos++ & 0xFFF]), sizeof(unsigned char), 0x1000-0x200, fp);
+  fclose(fp);
 }
 
-void exec ()
+
+void exec (struct cpu* cpu)
 {
-  opcode = (mem[PC] << 8) | (mem[PC+1]);
-  PC +=2;
+  unsigned short opcode = (cpu->mem[cpu->PC] << 8) | (cpu->mem[cpu->PC+1]);
+  cpu->PC+=2;
   
   switch (opcode & 0xf000) 
     {
@@ -72,14 +93,14 @@ void exec ()
 	      int i;
 	      for (i=0; i< W*H; i++) 
 		{ 
-		  gfx[i] = 0; 
+		  cpu->gfx[i] = 0; 
 		}
 	    }
 	    break;
  
 	  case 0x00ee:
 	    {
-	      PC = stack[SP--];
+	      cpu->PC = cpu->stack[cpu->SP--];
 	    }
 	    break;
 	  default:
@@ -93,50 +114,50 @@ void exec ()
 
     case 0x1000:  
       {
-	PC = (opcode & 0x0fff); 
+	cpu->PC = (opcode & 0x0fff); 
 	
       }
       break;
 
     case 0x2000: 
       { 
-	stack[++SP] = PC;
-	PC = (opcode & 0x0fff);
+	cpu->stack[++cpu->SP] = cpu->PC;
+	cpu->PC = (opcode & 0x0fff);
       }
       break;
 
     case 0x3000:
       {
-	if (V[(opcode & 0x0f00) >> 8] == (opcode & 0x00ff))
-	    PC+=2;
+	if (cpu->V[(opcode & 0x0f00) >> 8] == (opcode & 0x00ff))
+	  cpu->PC+=2;
       }
       break;
 
     case 0x4000:
       {
-	if (V[(opcode & 0x0f00) >> 8] != (opcode & 0x00ff))
-	    PC+=2;
+	if (cpu->V[(opcode & 0x0f00) >> 8] != (opcode & 0x00ff))
+	  cpu->PC+=2;
       }
       break;
 
     case 0x5000: 
       {
-	if (V[(opcode & 0x0f00) >> 8] == V[(opcode & 0x00f0) >> 4])
+	if (cpu->V[(opcode & 0x0f00) >> 8] == cpu->V[(opcode & 0x00f0) >> 4])
 	  {
-	    PC+=2;
+	    cpu->PC+=2;
 	  }
       }
       break;
 
     case 0x6000:
       {
-	V[(opcode & 0x0f00) >> 8] = (opcode & 0x00ff); 
+	cpu->V[(opcode & 0x0f00) >> 8] = (opcode & 0x00ff); 
       }
       break;
 
     case 0x7000:
       {
-	V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] + (opcode & 0x00ff); 
+	cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] + (opcode & 0x00ff); 
       }
       break;
 
@@ -146,85 +167,73 @@ void exec ()
 	  {
 	  case 0x0000:
 	    {
-	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x00f0) >> 4]; 
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x00f0) >> 4]; 
 	    } 
 	    break;
 
 	  case 0x0001:
 	    { 
-	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] | V[(opcode & 0x00f0) >> 4];
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] | cpu->V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
 
 	  case 0x0002:
 	    {
-	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] & V[(opcode & 0x00f0) >> 4]; 
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] & cpu->V[(opcode & 0x00f0) >> 4]; 
 	    }
 	    break;
 
 	  case 0x0003:
 	    {
-	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] ^ V[(opcode & 0x00f0) >> 4];
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x0f00) >> 8] ^ cpu->V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
 
 	  case 0x0004:
 	    {
-	      unsigned short tmp = V[(opcode & 0x0f00) >> 8] + V[(opcode & 0x00f0) >> 4];
+	      unsigned short tmp = cpu->V[(opcode & 0x0f00) >> 8] + cpu->V[(opcode & 0x00f0) >> 4];
 	      if ( tmp > 255 ) {
-		V[0xf] = 1;
+		cpu->V[0xf] = 1;
 	      } else {
-		V[0xf] = 0;
+		cpu->V[0xf] = 0;
 	      }
-	      V[(opcode & 0x0f00) >> 8] = (tmp & 0x00ff);
+	      cpu->V[(opcode & 0x0f00) >> 8] = (tmp & 0x00ff);
 	    }
-	    /*{
-	      unsigned short p = V[(opcode & 0x0F00) >> 8] + V[(opcode & 0x00F0) >> 4];
-	      V[0xf] = (p>>8);
-	      V[(opcode & 0x0F00) >> 8] = p;
-	      }*/
 	    break;   
   
 	  case 0x0005:
 	    {
-	      if ( V[(opcode & 0x0f00) >> 8] > V[(opcode & 0x00f0) >> 4] ) {
-		V[0xf] = 1;
+	      if ( cpu->V[(opcode & 0x0f00) >> 8] > cpu->V[(opcode & 0x00f0) >> 4] ) {
+		cpu->V[0xf] = 1;
 	      } else {
-		V[0xf] = 0;
+		cpu->V[0xf] = 0;
 	      }
-	      V[(opcode & 0x0f00) >> 8] -= V[(opcode & 0x00f0) >> 4];
+	      cpu->V[(opcode & 0x0f00) >> 8] -= cpu->V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
 
 	  case 0x0006:
 	    {
-	      V[0xf] = ( V[(opcode & 0x0f00) >> 8] & 1 );
-	      V[(opcode & 0x0f00) >> 8] >>= 1;
+	      cpu->V[0xf] = ( cpu->V[(opcode & 0x0f00) >> 8] & 1 );
+	      cpu->V[(opcode & 0x0f00) >> 8] >>= 1;
 	    }
 	    break;
 
 	  case 0x0007:
 	    {
-	      if ( V[(opcode & 0x00f0) >> 4] > V[(opcode & 0x0f00) >> 8] ) {
-		V[0xf] = 1;
+	      if ( cpu->V[(opcode & 0x00f0) >> 4] > cpu->V[(opcode & 0x0f00) >> 8] ) {
+		cpu->V[0xf] = 1;
 	      } else {
-		V[0xf] = 0;
+		cpu->V[0xf] = 0;
 	      }
-	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x00f0) >> 4] - V[(opcode & 0x0f00) >> 8];
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->V[(opcode & 0x00f0) >> 4] - cpu->V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
 
 	  case 0x000e:
 	    {
-	      if ( V[(opcode & 0x0f00) >> 8] > 7 ) {
-		V[0xf] = 1;
-	      } else {
-		V[0xf] = 0;
-	      }
-	      /*
-	      V[0xF] = V[(opcode & 0x0F00) >> 8] >> 7;
-	      V[(opcode & 0x0f00) >> 8] <<= 1;
-	      */
+	      cpu-> V[0xf] = cpu->V[(opcode & 0x0f00) >> 11];
+	      cpu->V[(opcode & 0x0f00) >> 8] <<= 1;
 	    }
 	    break;
 	  
@@ -239,81 +248,73 @@ void exec ()
 
     case 0x9000:
       {
-	if (V[(opcode & 0x0f00) >> 8] != V[(opcode & 0x00f0) >> 4])
+	if (cpu->V[(opcode & 0x0f00) >> 8] != cpu->V[(opcode & 0x00f0) >> 4])
 	  {
-	    PC+=2;
+	    cpu->PC+=2;
 	  } 
       }
 
       break;
     case 0xa000:
       {
-	I = (opcode & 0x0fff);
+	cpu->I = (opcode & 0x0fff);
       }
       break;
 
     case 0xb000:
       {
-	PC = (opcode & 0x0fff) + V[0]; 
+	cpu->PC = (opcode & 0x0fff) + cpu->V[0]; 
       }
       break;
 
     case 0xc000:
       {
-	V[(opcode & 0x0f00) >> 8] = (rand() % 255) & (opcode & 0x00ff);
+	cpu->V[(opcode & 0x0f00) >> 8] = (rand() % 255) & (opcode & 0x00ff);
       }
       break;
 
     case 0xd000:
       {
-	unsigned short x = V[(opcode & 0x0F00) >> 8];
-	unsigned short y = V[(opcode & 0x00F0) >> 4];
+	unsigned short x = cpu->V[(opcode & 0x0F00) >> 8];
+	unsigned short y = cpu->V[(opcode & 0x00F0) >> 4];
 	unsigned short height = opcode & 0x000F;
 	unsigned short pixel;
      
 	int xline, yline;
 	  
-	V[0xF] = 0;
+	cpu->V[0xF] = 0;
 	for (yline = 0; yline < height; yline++)
 	  {
-	    pixel = mem[I + yline];
+	    pixel = cpu->mem[cpu->I + yline];
 	    for(xline = 0; xline < 8; xline++)
 	      {
 		if((pixel & (0x80 >> xline)) != 0)
 		  {
-		    if(gfx[(x + xline + ((y + yline) * 64))] == 1)
-		      V[0xF] = 1;                                 
-		    gfx[x + xline + ((y + yline) * 64)] ^= 1;
+		    if(cpu->gfx[(x + xline + ((y + yline) * 64))] == 1)
+		      cpu->V[0xF] = 1;                                 
+		    cpu->gfx[x + xline + ((y + yline) * 64)] ^= 1;
 		  }
 	      }
 	  }
-	draw = 1;
       }
       break;
-
-      /****************************************************************
-Ex9E - SKP Vx
-Skip next instruction if key with the value of Vx is pressed.
-
-Checks the keyboard, and if the key corresponding to the value of Vx is currently in the down position, PC is increased by 2.
-      ****************************************************************/
 
     case 0xe000:
       {
 	switch (opcode & 0x000f)
 	  {
-	  case 0x000e: { } 
+	  case 0x000e:
+	    {
+	      if ( cpu->keys[ cpu->V[(opcode & 0x0F00) >> 8]&15] )
+		cpu->PC+=2;
+	    }
 	    break;
 
-
-      /****************************************************************
-ExA1 - SKNP Vx
-Skip next instruction if key with the value of Vx is not pressed.
-
-Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
-      ****************************************************************/
-
-	  case 0x0001: { PC +=2; }
+	  case 0x0001: 
+	    {
+	      if (! (cpu->keys[ cpu->V[(opcode & 0x0F00) >> 8]&15] ) )
+		cpu->PC+=2;
+	    }
 	    break;
 	  }
       }
@@ -325,49 +326,45 @@ Checks the keyboard, and if the key corresponding to the value of Vx is currentl
 	  {
 	  case 0x0007:
 	    {
-	      V[(opcode & 0x0f00) >> 8] = DT;
+	      cpu->V[(opcode & 0x0f00) >> 8] = cpu->DT;
 	    }
 	    break;
 
-	    /****************************************************************
-Fx0A - LD Vx, K
-Wait for a key press, store the value of the key in Vx.
-
-All execution stops until a key is pressed, then the value of that key is stored in Vx.
-	    ****************************************************************/
-
-	  case 0x000a: { } 
+	  case 0x000a:
+	    {
+	      cpu->wait_key = ((opcode & 0x0f00) >> 8 ) | 0x80;
+	    }
 	    break;
  
 	  case 0x0015:
 	    {
-	      DT = V[(opcode & 0x0f00) >> 8];
+	      cpu->DT = cpu->V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
 
 	  case 0x0018:
 	    {
-	      ST = V[(opcode & 0x0f00) >> 8];
+	      cpu->ST = cpu->V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
 
 	  case 0x001e:
 	    {
-	      I += V[(opcode & 0x0f00) >> 8];
+	      cpu->I += cpu->V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
 
 	  case 0x0029:
 	    {
-	      I = V[(opcode & 0x0f00) >> 8] * 5;
+	      cpu->I = cpu->V[(opcode & 0x0f00) >> 8] * 5;
 	    }
 	    break; /* Fonts start at address 0x0000 and occupy 5 bytes, so *5 is for the offset. */
 
 	  case 0x0033:
 	    { 
-	      mem[I] = V[(opcode & 0x0f00) >> 8] / 100;
-	      mem[I+1] = ( V[(opcode & 0x0f00) >> 8] % 100 ) / 10;
-	      mem[I+2] = V[(opcode & 0x0f00) >> 8] % 10;
+	      cpu->mem[cpu->I] = cpu->V[(opcode & 0x0f00) >> 8] / 100;
+	      cpu->mem[cpu->I+1] = ( cpu->V[(opcode & 0x0f00) >> 8] % 100 ) / 10;
+	      cpu->mem[cpu->I+2] = cpu->V[(opcode & 0x0f00) >> 8] % 10;
 	    }
 	    break;
 
@@ -375,7 +372,7 @@ All execution stops until a key is pressed, then the value of that key is stored
 	    {
 	      int index;
 	      for (index=0; index <= ( (opcode & 0x0f00) >> 8 ); index++) {
-		mem[I + index] = V[index];
+		cpu->mem[cpu->I + index] = cpu->V[index];
 	      }
 	    }
 	    break;
@@ -384,7 +381,7 @@ All execution stops until a key is pressed, then the value of that key is stored
 	    {
 	      int index;
 	      for (index=0; index <= ( (opcode & 0x0f00) >> 8 ); index++) {
-		V[index] =  mem[I + index];
+		cpu->V[index] =  cpu->mem[cpu->I + index];
 	      }
       	    }
 	    break;
@@ -397,92 +394,111 @@ All execution stops until a key is pressed, then the value of that key is stored
       }
       break;
     }
-
-  if (DT > 0) { --DT; }
-  if (ST > 0) { printf("Beep!\n\a"); --ST; }
-
-  SDL_Delay(1000/60);
 } 
 
 
 
 int main (int argc, char** argv)
 {
-  SP = 0;
-  PC = 0x200;
-  font();
-  load(argv[1]);
-
+  struct cpu cpu;
+  cpu_init(&cpu);
+  load(argv[1], &cpu);
+ 
   /* Create a screen. */
-
   SDL_Init(SDL_INIT_VIDEO);
-  SDL_Window *window;
-  window = SDL_CreateWindow("Chip-8", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 512, 256, NULL);
-  SDL_Renderer *renderer;
-  renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED);
-  SDL_Event events;
-  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-  SDL_RenderClear(renderer);
-
+  SDL_Window *window = SDL_CreateWindow(argv[1], SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 512, 256, NULL);
+  SDL_Renderer *renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED);
+  
+  unsigned insns_per_frame = 50;
+  unsigned max_consecutive_insns = 0;
+  int frames_done = 0;
+  struct timespec start_t;
+  clock_gettime(CLOCK_MONOTONIC_RAW, &start_t);
   int running=1;
   while(running)
-    {
-      	  // Clear screen
-	  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-	  SDL_RenderClear(renderer);
+    { 
+      for(unsigned a=0; a<max_consecutive_insns && !(cpu.wait_key & 0x80); ++a)
+     	  exec(&cpu);
 
-	  while (SDL_PollEvent(&events))
-	    {
-	      switch (events.type)
-		{
-		  // Check to see if X on window was hit
-		case SDL_QUIT:
-		  {
-		    running = 0;
-		  } break;
-		}
-	    }
-
-	  exec();
-
-
-
-	  if(draw) {
-	  // Clear screen
-	  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-	  SDL_RenderClear(renderer);
-	  // Draw screen
-	  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-	  SDL_Rect *destRect = new SDL_Rect;
-	  destRect->x = 0;
-	  destRect->y = 0;
-	  destRect->w = 8;
-	  destRect->h = 8;
-
-	  for (int y = 0; y < 32; y++)
-	    {
-	      for (int x = 0; x < 64; x++)
-		{
-		  if (gfx[(y * 64) + x] == 1)
+      for(SDL_Event ev; SDL_PollEvent(&ev); )
+            switch(ev.type)
+            {
+	      unsigned short tmp;
+                case SDL_QUIT: running = 0; break;
+                case SDL_KEYDOWN:
+                case SDL_KEYUP:
+		  switch (ev.key.keysym.sym)
 		    {
-		      destRect->x = x * 8;
-		      destRect->y = y * 8;
-
-		      SDL_RenderFillRect(renderer, destRect);
+		    case SDLK_1: cpu.keys[0x1] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x1]){tmp=1;} break;
+		    case SDLK_2: cpu.keys[0x2] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x2]){tmp=1;} break;
+		    case SDLK_3: cpu.keys[0x3] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x3]){tmp=1;} break;
+		    case SDLK_4: cpu.keys[0xC] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xC]){tmp=1;} break;
+		    case SDLK_q: cpu.keys[0x4] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x4]){tmp=1;} break;
+		    case SDLK_w: cpu.keys[0x5] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x5]){tmp=1;} break;
+		    case SDLK_e: cpu.keys[0x6] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x6]){tmp=1;} break;
+		    case SDLK_r: cpu.keys[0xD] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xD]){tmp=1;} break;
+		    case SDLK_a: cpu.keys[0x7] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x7]){tmp=1;} break;
+		    case SDLK_s: cpu.keys[0x8] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x8]){tmp=1;} break;
+		    case SDLK_d: cpu.keys[0x9] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x9]){tmp=1;} break;
+		    case SDLK_f: cpu.keys[0xE] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xE]){tmp=1;} break;
+		    case SDLK_z: cpu.keys[0xA] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xA]){tmp=1;} break;
+		    case SDLK_x: cpu.keys[0x0] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x0]){tmp=1;} break;
+		    case SDLK_c: cpu.keys[0xB] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xB]){tmp=1;} break;
+		    case SDLK_v: cpu.keys[0xF] = ev.type==SDL_KEYDOWN; if (cpu.keys[0xF]){tmp=1;} break;
+		    case SDLK_5: cpu.keys[0x5] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x5]){tmp=1;} break;
+		    case SDLK_6: cpu.keys[0x6] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x6]){tmp=1;} break;
+		    case SDLK_7: cpu.keys[0x7] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x7]){tmp=1;} break;
+		    case SDLK_8: cpu.keys[0x8] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x8]){tmp=1;} break;
+		    case SDLK_9: cpu.keys[0x9] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x9]){tmp=1;} break;
+		    case SDLK_0: cpu.keys[0x0] = ev.type==SDL_KEYDOWN; if (cpu.keys[0x0]){tmp=1;} break;
+		    case SDLK_ESCAPE: running=0; break;
 		    }
+		  if(ev.type==SDL_KEYDOWN && (cpu.wait_key & 0x80))
+                    {
+		      cpu.wait_key        &= 0x7F;
+		      cpu.V[cpu.wait_key] = tmp;
+                    }
+            }
+    
+       	struct timespec cur_t;
+	clock_gettime(CLOCK_MONOTONIC_RAW, &cur_t);
+	double elapsed = (( 1000.0*cur_t.tv_sec + 1e-6*cur_t.tv_nsec) - (1000.0*start_t.tv_sec + 1e-6*start_t.tv_nsec))/1000;
+        int frames = int(elapsed * 60) - frames_done;
+        if(frames > 0)
+        {
+            frames_done += frames;
+            
+	    if (cpu.DT > 0) { --cpu.DT; }
+	    if (cpu.ST > 0) { printf("Beep!\n\a"); --cpu.ST; }
+            
+	    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+	    SDL_RenderClear(renderer);
+	    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+	    	    
+	    SDL_Rect* destRect = (SDL_Rect *)malloc(sizeof(SDL_Rect));
+	    destRect->x = 0;
+	    destRect->y = 0;
+	    destRect->w = 8;
+	    destRect->h = 8;
+	    int x,y;  
+	    for (y = 0; y < H; y++)
+	      for (x = 0; x < W; x++)
+		if (cpu.gfx[(y * 64) + x] == 1) {
+			destRect->x = x * 8;
+			destRect->y = y * 8;
+
+			SDL_RenderFillRect(renderer, destRect);
 		}
-	    }
-
-	  delete destRect;
-
-	  SDL_RenderPresent(renderer);
-	  draw=0;
-	  }
+	    	    
+	    free (destRect);
+	    SDL_RenderPresent(renderer);
+        }
+        max_consecutive_insns = fmax(frames, 1) * insns_per_frame;
+        if((cpu.wait_key & 0x80) || !frames) SDL_Delay(1000/60);
     }
-
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   SDL_Quit();
-	
+  
   return 0;
 }
