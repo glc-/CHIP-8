@@ -1,0 +1,24 @@
+* Research
+** Watching bisqwits video / reading his code
+   CLOCK: [2015-07-16 Thu 00:37]--[2015-07-16 Thu 01:47] =>  1:10
+
+* chip8 documentation site: http://devernay.free.fr/hacks/chip8/C8TECH10.HTM
+
+* Not sure why bisqwit uses a union for RAM
+
+* Unnamed structure & union fields in structures & unions 
+http://gcc.gnu.org/onlinedocs/gcc/Unnamed-Fields.html
+
+* bisqwit deviates from the spec on:
+** instructions per frame
+** some instructions, draw amongst other.
+
+* difference in emulator & virtual machine?
+
+* Make hex to binary converter
+
+* Coding
+** Making a skeleton of the CPU & instructions; mostly comments
+   CLOCK: [2015-07-16 Thu 01:49]--[2015-07-16 Thu 02:00] =>  0:11
+
+* http://www.multigesture.net/articles/how-to-write-an-emulator-chip-8-interpreter/
