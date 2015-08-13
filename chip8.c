@@ -1,14 +1,17 @@
 #include <stdlib.h> /* for rand() */
 #include <SDL.h>
 #include <fstream>
+#include <unistd.h>
 
 #define W 64
 #define H 32
 
 unsigned char mem[0x1000];
-unsigned char V[0x10];
+unsigned char V[16];
 unsigned short I, PC, SP, stack[16];
 unsigned char DT, ST; /* Delay Timer, Sound Timer */
+
+unsigned short opcode;
 
 unsigned char gfx[W * H];
 unsigned char draw;
@@ -55,10 +58,9 @@ void load(const char* filename, unsigned pos = 0x200)
 
 void exec ()
 {
-  printf("vvvvvvv!\n");
-  unsigned short opcode = (mem[PC] << 8) | (mem[PC+1]);
-
-  printf("PC = 0x%x\topcode = 0x%x\tSP = %u\t", PC, opcode, SP);
+  opcode = (mem[PC] << 8) | (mem[PC+1]);
+  PC +=2;
+  
   switch (opcode & 0xf000) 
     {
     case 0x0000: 
@@ -71,45 +73,52 @@ void exec ()
 	      for (i=0; i< W*H; i++) 
 		{ 
 		  gfx[i] = 0; 
-		} 
-	    } break; 
+		}
+	    }
+	    break;
+ 
 	  case 0x00ee:
 	    {
-	      PC = stack[--SP];
-	      printf("boooooooooooooooo!!!\n");
+	      PC = stack[SP--];
 	    }
-	    break; 
+	    break;
+	  default:
+	    {
+	      printf("Invalid opcode\n");
+	    }
+	    break;
 	  } /*end 0x00ff switch */
       } /* end case 0x0000 */
+      break;
+
     case 0x1000:  
       {
 	PC = (opcode & 0x0fff); 
-	PC-=2; /* Decrement PC since it will be increased by Fetch */ 
+	
       }
       break;
+
     case 0x2000: 
       { 
-	stack[SP++] = PC;
+	stack[++SP] = PC;
 	PC = (opcode & 0x0fff);
-	PC-=2;
       }
       break;
+
     case 0x3000:
       {
-	if (V[(opcode & 0x0f00) >> 8] == (opcode & 0x00ff)) 
-	  { 
-	    PC+=2; 
-	  }
+	if (V[(opcode & 0x0f00) >> 8] == (opcode & 0x00ff))
+	    PC+=2;
       }
       break;
+
     case 0x4000:
       {
 	if (V[(opcode & 0x0f00) >> 8] != (opcode & 0x00ff))
-	  {
-	    PC+=2; 
-	  }
+	    PC+=2;
       }
       break;
+
     case 0x5000: 
       {
 	if (V[(opcode & 0x0f00) >> 8] == V[(opcode & 0x00f0) >> 4])
@@ -118,16 +127,19 @@ void exec ()
 	  }
       }
       break;
+
     case 0x6000:
       {
 	V[(opcode & 0x0f00) >> 8] = (opcode & 0x00ff); 
       }
       break;
+
     case 0x7000:
       {
 	V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] + (opcode & 0x00ff); 
       }
       break;
+
     case 0x8000: 
       {
 	switch (opcode & 0x000f) 
@@ -137,21 +149,25 @@ void exec ()
 	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x00f0) >> 4]; 
 	    } 
 	    break;
+
 	  case 0x0001:
 	    { 
 	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] | V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
+
 	  case 0x0002:
 	    {
 	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] & V[(opcode & 0x00f0) >> 4]; 
 	    }
 	    break;
+
 	  case 0x0003:
 	    {
 	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x0f00) >> 8] ^ V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
+
 	  case 0x0004:
 	    {
 	      unsigned short tmp = V[(opcode & 0x0f00) >> 8] + V[(opcode & 0x00f0) >> 4];
@@ -160,9 +176,15 @@ void exec ()
 	      } else {
 		V[0xf] = 0;
 	      }
-	      V[(opcode & 0x0f00) >> 8] = (tmp & 0x00ff); /* V[(opcode & 0x0f00) >> 8] = tmp % 256; */
+	      V[(opcode & 0x0f00) >> 8] = (tmp & 0x00ff);
 	    }
-	    break;     
+	    /*{
+	      unsigned short p = V[(opcode & 0x0F00) >> 8] + V[(opcode & 0x00F0) >> 4];
+	      V[0xf] = (p>>8);
+	      V[(opcode & 0x0F00) >> 8] = p;
+	      }*/
+	    break;   
+  
 	  case 0x0005:
 	    {
 	      if ( V[(opcode & 0x0f00) >> 8] > V[(opcode & 0x00f0) >> 4] ) {
@@ -173,12 +195,14 @@ void exec ()
 	      V[(opcode & 0x0f00) >> 8] -= V[(opcode & 0x00f0) >> 4];
 	    }
 	    break;
+
 	  case 0x0006:
 	    {
 	      V[0xf] = ( V[(opcode & 0x0f00) >> 8] & 1 );
 	      V[(opcode & 0x0f00) >> 8] >>= 1;
 	    }
 	    break;
+
 	  case 0x0007:
 	    {
 	      if ( V[(opcode & 0x00f0) >> 4] > V[(opcode & 0x0f00) >> 8] ) {
@@ -189,6 +213,7 @@ void exec ()
 	      V[(opcode & 0x0f00) >> 8] = V[(opcode & 0x00f0) >> 4] - V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
+
 	  case 0x000e:
 	    {
 	      if ( V[(opcode & 0x0f00) >> 8] > 7 ) {
@@ -196,11 +221,22 @@ void exec ()
 	      } else {
 		V[0xf] = 0;
 	      }
+	      /*
+	      V[0xF] = V[(opcode & 0x0F00) >> 8] >> 7;
 	      V[(opcode & 0x0f00) >> 8] <<= 1;
+	      */
+	    }
+	    break;
+	  
+	  default:
+	    {
+	      printf("Invalid opcode\n");
 	    }
 	    break;
 	  } /* end switch (opcode & 0x000f) */
       } /* end case 0x8000 */
+      break;
+
     case 0x9000:
       {
 	if (V[(opcode & 0x0f00) >> 8] != V[(opcode & 0x00f0) >> 4])
@@ -208,22 +244,26 @@ void exec ()
 	    PC+=2;
 	  } 
       }
+
       break;
     case 0xa000:
       {
 	I = (opcode & 0x0fff);
       }
       break;
+
     case 0xb000:
       {
 	PC = (opcode & 0x0fff) + V[0]; 
       }
       break;
+
     case 0xc000:
       {
-	V[(opcode & 0x0f00) >> 8] = rand() & (opcode & 0x00ff);
+	V[(opcode & 0x0f00) >> 8] = (rand() % 255) & (opcode & 0x00ff);
       }
       break;
+
     case 0xd000:
       {
 	unsigned short x = V[(opcode & 0x0F00) >> 8];
@@ -262,7 +302,8 @@ Checks the keyboard, and if the key corresponding to the value of Vx is currentl
       {
 	switch (opcode & 0x000f)
 	  {
-	  case 0x000e: { return; }
+	  case 0x000e: { } 
+	    break;
 
 
       /****************************************************************
@@ -272,9 +313,11 @@ Skip next instruction if key with the value of Vx is not pressed.
 Checks the keyboard, and if the key corresponding to the value of Vx is currently in the up position, PC is increased by 2.
       ****************************************************************/
 
-	  case 0x0001: { return; }
+	  case 0x0001: { PC +=2; }
+	    break;
 	  }
       }
+      break;
 
     case 0xf000:
       {
@@ -293,28 +336,33 @@ Wait for a key press, store the value of the key in Vx.
 All execution stops until a key is pressed, then the value of that key is stored in Vx.
 	    ****************************************************************/
 
-	  case 0x000a: { }
-	    break; 
+	  case 0x000a: { } 
+	    break;
+ 
 	  case 0x0015:
 	    {
 	      DT = V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
+
 	  case 0x0018:
 	    {
 	      ST = V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
+
 	  case 0x001e:
 	    {
 	      I += V[(opcode & 0x0f00) >> 8];
 	    }
 	    break;
+
 	  case 0x0029:
 	    {
 	      I = V[(opcode & 0x0f00) >> 8] * 5;
 	    }
 	    break; /* Fonts start at address 0x0000 and occupy 5 bytes, so *5 is for the offset. */
+
 	  case 0x0033:
 	    { 
 	      mem[I] = V[(opcode & 0x0f00) >> 8] / 100;
@@ -322,63 +370,64 @@ All execution stops until a key is pressed, then the value of that key is stored
 	      mem[I+2] = V[(opcode & 0x0f00) >> 8] % 10;
 	    }
 	    break;
+
 	  case 0x0055:
 	    {
 	      int index;
-	      for (index=0; index < ( (opcode & 0x0f00) >> 8 ); index++) {
+	      for (index=0; index <= ( (opcode & 0x0f00) >> 8 ); index++) {
 		mem[I + index] = V[index];
 	      }
 	    }
 	    break;
+
 	  case 0x0065:
 	    {
 	      int index;
-	      for (index=0; index < ( (opcode & 0x0f00) >> 8 ); index++) {
+	      for (index=0; index <= ( (opcode & 0x0f00) >> 8 ); index++) {
 		V[index] =  mem[I + index];
 	      }
       	    }
 	    break;
 	  }
       }
+      break;
     default:
       {
-	printf("slipped thru\n");
+	printf("Invalid opcode\n");
       }
       break;
     }
-  PC += 2; /* Increment opcode, jump instructions counter this with PC-=2 */
-}
+
+  if (DT > 0) { --DT; }
+  if (ST > 0) { printf("Beep!\n\a"); --ST; }
+
+  SDL_Delay(1000/60);
+} 
 
 
 
 int main (int argc, char** argv)
 {
-
   SP = 0;
   PC = 0x200;
-
+  font();
   load(argv[1]);
-  printf("%x\n", mem[0x222]);
 
   /* Create a screen. */
 
   SDL_Init(SDL_INIT_VIDEO);
-
   SDL_Window *window;
   window = SDL_CreateWindow("Chip-8", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 512, 256, NULL);
-
   SDL_Renderer *renderer;
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_PRESENTVSYNC | SDL_RENDERER_ACCELERATED);
-  
   SDL_Event events;
-  
   SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
   SDL_RenderClear(renderer);
 
-  int running = 1;
+  int running=1;
   while(running)
     {
-	  // Clear screen
+      	  // Clear screen
 	  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
 	  SDL_RenderClear(renderer);
 
@@ -396,6 +445,12 @@ int main (int argc, char** argv)
 
 	  exec();
 
+
+
+	  if(draw) {
+	  // Clear screen
+	  SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+	  SDL_RenderClear(renderer);
 	  // Draw screen
 	  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
 	  SDL_Rect *destRect = new SDL_Rect;
@@ -403,7 +458,6 @@ int main (int argc, char** argv)
 	  destRect->y = 0;
 	  destRect->w = 8;
 	  destRect->h = 8;
-
 
 	  for (int y = 0; y < 32; y++)
 	    {
@@ -422,12 +476,13 @@ int main (int argc, char** argv)
 	  delete destRect;
 
 	  SDL_RenderPresent(renderer);
+	  draw=0;
+	  }
     }
+
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
-
   SDL_Quit();
 	
-
   return 0;
 }
