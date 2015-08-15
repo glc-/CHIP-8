@@ -1,30 +1,26 @@
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h> /* for rand() */
-#include <SDL.h>
+#include <string.h>
 #include <time.h>
+#include <SDL.h>
 
 #define W 64
 #define H 32
 #define max(A, B)  ((A) > (B) ? (A) : (B))
 
 struct cpu {
-  unsigned char mem[0x1000], V[16], DT, ST, gfx[W * H], keys[16], wait_key;
+  unsigned char mem[0x1000], V[16], DT, ST, gfx[W*H/8], keys[16], wait_key;
   unsigned short stack[16], I, PC, SP;
 };
-
 unsigned fonts[16] =
 { 0xF999F, 0x26227, 0xF1F8F, 0xF1F1F, 0x99F11, 0xF8F1F, 0xF8F9F, 0xF1244,
   0xF9F9F, 0xF9F1F, 0xF9F99, 0xE9E9E, 0xF888F, 0xE999E, 0xF8F8F, 0xF8F88 };
 void font_init (struct cpu* cpu) { for(int i=0,k=0;i<16;i++){ for(int j=16;j>=0;j-=4){ cpu->mem[k++]=(fonts[i]>>j)&0xF; }}}
-/* memcpy? *//*memset(cpu->V,0,16);*/
 void load (const char* n, struct cpu* cpu){ FILE *f=fopen(n,"r"); fread(&(cpu->mem[0x200]),sizeof(char),0xe00,f); fclose(f); }
 void cpu_init  (struct cpu* cpu)
-{ 
-  cpu->PC = 0x200, cpu->I = 0, cpu->SP = 0, cpu->DT = 0, cpu->ST = 0, cpu->wait_key = 0;
-  for(int i=0;i<0x1000;i++) { cpu->mem[i] = 0; } for(int i=0;i<H*W;i++) { cpu->gfx[i] = 0; }
-  for(int i=0;i<16;i++) { cpu->V[i] = 0;    cpu->stack[i] = 0;    cpu->keys[i] = 0; } 
-  font_init(cpu); 
-}
+{ memset(cpu->mem,0,0x1000); memset(cpu->gfx,0,W*H/8); memset(cpu->V,0,16); memset(cpu->stack,0,16);memset(cpu->keys,0,16);
+  cpu->PC = 0x200;    cpu->I = 0;    cpu->SP = 0;    cpu->DT = 0;    cpu->ST = 0;    cpu->wait_key = 0;    font_init(cpu);  }
 
 #define params struct cpu* cpu, unsigned short op, \
 unsigned short nnn, unsigned short n, unsigned short x, unsigned short y, unsigned short kk
@@ -45,56 +41,43 @@ unsigned short nnn, unsigned short n, unsigned short x, unsigned short y, unsign
 | y - A 4-bit value, the upper 4 bits of the low byte of the instruction  |
 | kk or byte - An 8-bit value, the lowest 8 bits of the instruction       |
 '------------------------------------------------------------------------*/
-void add_vx_kk (params) {    V[x] += kk;                                                              }
-void or        (params) {    V[x] |= V[y];                                                            }
-void and       (params) {    V[x] &= V[y];                                                            }
-void xor       (params) {    V[x] ^= V[y];                                                            }
-void rnd       (params) {    V[x]  = (rand() % 255) & kk;                                             }
-void ld_vx_vy  (params) {    V[x]  = V[y];                                                            }
-void ld_vx_kk  (params) {    V[x]  = kk;                                                              }
-void ld_vx_dt  (params) {    V[x] = DT;                                                               }
-void subb      (params) {    VF = ( V[x] > V[y] ) ? 1 : 0;    V[x] -= V[y];                           }
-void shr       (params) {    VF = ( V[x] & 1 );    V[x] >>= 1;                                        }
-void subnb     (params) {    VF = ( V[y] > V[x] ) ? 1 : 0;    V[x] = V[y] - V[x];                     }
-void shl       (params) {    VF = V[x >> 3]; V[x] <<= 1;                                              }
-void add_i_vx  (params) {    I += V[x];                                                               }
-void ld_I_nnn  (params) {    I  = nnn;                                                                }
-void ld_f_vx   (params) {    I  = V[x] * 5;  /* Fonts are 5 bytes, * 5 is the offset. */              }
-void ret       (params) {    PC_ = stack[SP--];                                                       }
-void jp_nnn    (params) {    PC_ = nnn;                                                               }
-void jp_v0_nnn (params) {    PC_ = nnn + V[0];                                                        }
-void ld_dt_vx  (params) {    DT = V[x];                                                               }
-void ld_st_vx  (params) {    ST = V[x];                                                               }
+void add_vx_kk (params) {    V[x]  += kk;                                                             }
+void or        (params) {    V[x]  |= V[y];                                                           }
+void and       (params) {    V[x]  &= V[y];                                                           }
+void xor       (params) {    V[x]  ^= V[y];                                                           }
+void rnd       (params) {    V[x]   = (rand() % 255) & kk;                                            }
+void ld_vx_vy  (params) {    V[x]   = V[y];                                                           }
+void ld_vx_kk  (params) {    V[x]   = kk;                                                             }
+void ld_vx_dt  (params) {    V[x]   = DT;                                                             }
+void subb      (params) {    VF     = ( V[x] > V[y] ) ? 1 : 0;    V[x] -= V[y];                       }
+void shr       (params) {    VF     = ( V[x] & 1 );    V[x] >>= 1;                                    }
+void subnb     (params) {    VF     = ( V[y] > V[x] ) ? 1 : 0;    V[x] = V[y] - V[x];                 }
+void shl       (params) {    VF     = V[x >> 3]; V[x] <<= 1;                                          }
+void add_i_vx  (params) {    I     += V[x];                                                           }
+void ld_I_nnn  (params) {    I      = nnn;                                                            }
+void ld_f_vx   (params) {    I      = V[x] * 5;  /* Fonts are 5 bytes, * 5 is the offset. */          }
+void ret       (params) {    PC_    = stack[SP--];                                                    }
+void jp_nnn    (params) {    PC_    = nnn;                                                            }
+void jp_v0_nnn (params) {    PC_    = nnn + V[0];                                                     }
+void ld_dt_vx  (params) {    DT     = V[x];                                                           }
+void ld_st_vx  (params) {    ST     = V[x];                                                           }
 void bcd       (params) {    mem[I] = V[x] / 100; mem[I+1] = (V[x] % 100) / 10; mem[I+2] = V[x] % 10; }
 void addc      (params) {    n = V[x] + V[y];    VF = (n>0xFF) ? 1 : 0; V[x] = n & 0xFF;              }
-void call_nnn  (params) {    stack[++SP] = PC_;    PC_ = nnn;                                         }
+void call_nnn  (params) {    stack[++SP] = PC_;          PC_ = nnn;                                   }
 void ld_vx_k   (params) {    cpu->wait_key = x | 0x80;                                                }
-void se_vx_kk  (params) {    if (V[x] == kk) PC_ += 2;                                                }
-void sne_vx_kk (params) {    if (V[x] != kk) PC_ += 2;                                                }
-void se_vx_vy  (params) {    if (V[x] == V[y]) PC_ += 2;                                              }
-void sne_vx_vy (params) {    if (V[x] != V[y]) PC_ += 2;                                              }
-void skp_vx    (params) {    if (   cpu->keys[ V[x] ] )  PC_ += 2;                                    }
+void se_vx_kk  (params) {    if ( V[x] == kk   )         PC_ += 2;                                    }
+void sne_vx_kk (params) {    if ( V[x] != kk   )         PC_ += 2;                                    }
+void se_vx_vy  (params) {    if ( V[x] == V[y] )         PC_ += 2;                                    }
+void sne_vx_vy (params) {    if ( V[x] != V[y] )         PC_ += 2;                                    }
+void skp_vx    (params) {    if (   cpu->keys[ V[x] ]  ) PC_ += 2;                                    }
 void sknp_vx   (params) {    if (! (cpu->keys[ V[x] ]) ) PC_ += 2;                                    }
-void cls       (params) {    for (int i=0; i< W*H; i++) { cpu->gfx[i] = 0; }                          }
-void store_reg (params) {    for (int i=0; i<=x; i++) { mem[I + i] = V[i]; }                          }
-void read_reg  (params) {    for (int i=0; i<=x; i++) { V[i] = mem[I + i]; }                          }
-/* use entire byte, handle wrapping wrapping */
-void drw       (params)
-{
-  unsigned short xcoord = V[x], ycoord = V[y];
-  unsigned short height = n, pixel; int xline, yline;
-  VF = 0;
-  for (yline = 0; yline < height; yline++) {
-      pixel = mem[I + yline];
-      for (xline = 0; xline < 8; xline++) {
-	  if ((pixel & (0x80 >> xline)) != 0) {
-	      if (cpu->gfx[(xcoord + xline + ((ycoord + yline) * 64))] == 1)
-		VF = 1;                                 
-	      cpu->gfx[xcoord + xline + ((ycoord + yline) * 64)] ^= 1;
-	    }
-	}
-    }
-}
+void cls       (params) {    for (int i=0; i< W*H/8; i++) { cpu->gfx[i] = 0;          }               }
+void store_reg (params) {    for (int i=0; i<=x; i++)     { mem[I + i]  = V[i];       }               }
+void read_reg  (params) {    for (int i=0; i<=x; i++)     { V[i]        = mem[I + i]; }               }
+void drw       (params) /* use entire byte, handle wrapping */
+{     VF=0; unsigned char a, b; for (int i=0; i<n; i++) { for(int j=0; j<8; j++) {
+      a = cpu->gfx[(V[y]+i)*8 + (V[x]+j)/8] >> (7-(V[x]+j)%8)&1;    b = mem[(I+i)&0xFFF] >> (7-j)&1;
+      cpu->gfx[(V[y]+i)*8 + (V[x]+j)/8] ^= b * (unsigned)pow(2, 7-(V[x]+j)%8);    VF = (a & b) ? 1 : VF; } } }
 
 void (*zero_table[2]) (params) = { cls, ret };
 void (*alu_table[9])  (params) = { ld_vx_vy, or, and, xor, addc, subb, shr, subnb, shl };
@@ -106,7 +89,7 @@ void e    (params) { e_table[ ((n)==0xe) ? 0 : (n) ] (cpu, op, nnn, n, x, y, kk)
 void f    (params) { unsigned u=kk%9; f_table[((u==3)||(u==6))?((u==3)?((n==5)?3:0):((n==8)?6:8)):u](cpu,op,nnn,n,x,y,kk); }
 void (*chip8_table[16]) (params) =
 { zero, jp_nnn, call_nnn, se_vx_kk, sne_vx_kk, se_vx_vy, ld_vx_kk, 
-  add_vx_kk, alu, sne_vx_vy, ld_I_nnn, jp_v0_nnn, rnd, drw, e, f };
+  add_vx_kk, alu, sne_vx_vy, ld_I_nnn, jp_v0_nnn, rnd, drw, e, f  };
 void exec (struct cpu* cpu)
 { 
   unsigned short ins = (mem[PC_] << 8) | (mem[PC_+1]);    PC_ += 2; 
@@ -116,14 +99,14 @@ void exec (struct cpu* cpu)
 }
 
 #undef params
-#undef PC_ cpu->PC
-#undef SP cpu->SP
-#undef I cpu->I
-#undef DT cpu->DT
-#undef ST cpu->ST
-#undef mem cpu->mem
-#undef V cpu->V
-#undef stack cpu->stack
+#undef PC_
+#undef SP
+#undef I
+#undef DT
+#undef ST
+#undef mem
+#undef V
+#undef stack
 
 int main (int argc, char** argv)
 {
@@ -194,13 +177,8 @@ int main (int argc, char** argv)
 
 	  SDL_Rect* destRect = (SDL_Rect *)malloc(sizeof(SDL_Rect));
 	  destRect->x = 0;    destRect->y = 0;    destRect->w = 8;    destRect->h = 8;
-	  for (int y = 0; y < H; y++)
-	    for (int x = 0; x < W; x++)
-	      if (cpu->gfx[(y * 64) + x] == 1) {
-		destRect->x = x * 8;
-		destRect->y = y * 8;
-		SDL_RenderFillRect(renderer, destRect);
-	      }   	    
+	  for(int i=0;i<H; i++){ for(int j=0;j<W/8;j++){ for(int k=7;k>=0;k--) { if((cpu->gfx[(i*8)+j]>>k)&1==1)
+		  { destRect->x = ((j*8) + (7-k)) *8; destRect->y = i*8; SDL_RenderFillRect(renderer, destRect); }}}}
 	  free(destRect);
 	  SDL_RenderPresent(renderer);
         }
@@ -216,52 +194,3 @@ int main (int argc, char** argv)
   
   return 0;
 }
-
-/*
-void cls       (params) {    for (int i=0; i< W*H; i++) { cpu->gfx[i] = 0; }                          }
-void ret       (params) {    PC_ = stack[SP--];                                                       }
-void jp_nnn    (params) {    PC_ = nnn;                                                               }
-void call_nnn  (params) {    stack[++SP] = PC_;    PC_ = nnn;                                         }
-void se_vx_kk  (params) {    if (V[x] == kk) PC_ += 2;                                                }
-void sne_vx_kk (params) {    if (V[x] != kk) PC_ += 2;                                                }
-void se_vx_vy  (params) {    if (V[x] == V[y]) PC_ += 2;                                              }
-void ld_vx_kk  (params) {    V[x]  = kk;                                                              }
-void add_vx_kk (params) {    V[x] += kk;                                                              }
-void sne_vx_vy (params) {    if (V[x] != V[y]) PC_ += 2;                                              }
-void ld_I_nnn  (params) {    I  = nnn;                                                                }
-void jp_v0_nnn (params) {    PC_ = nnn + V[0];                                                        }
-void rnd       (params) {    V[x]  = (rand() % 255) & kk;                                             }
-void ld_vx_vy  (params) {    V[x]  = V[y];                                                            }
-void or        (params) {    V[x] |= V[y];                                                            }
-void and       (params) {    V[x] &= V[y];                                                            }
-void xor       (params) {    V[x] ^= V[y];                                                            }
-void addc      (params) {    n = V[x] + V[y];    VF = (n>0xFF) ? 1 : 0; V[x] = n & 0xFF;              }
-void subb      (params) {    VF = ( V[x] > V[y] ) ? 1 : 0;    V[x] -= V[y];                           }
-void shr       (params) {    VF = ( V[x] & 1 );    V[x] >>= 1;                                        }
-void subnb     (params) {    VF = ( V[y] > V[x] ) ? 1 : 0;    V[x] = V[y] - V[x];                     }
-void shl       (params) {    VF = V[x >> 3]; V[x] <<= 1;                                              }
-void skp_vx    (params) {    if (   cpu->keys[ V[x] ] )  PC_ += 2;                                    }
-void sknp_vx   (params) {    if (! (cpu->keys[ V[x] ]) ) PC_ += 2;                                    }
-void ld_vx_dt  (params) {    V[x] = DT;                                                               }
-void ld_vx_k   (params) {    cpu->wait_key = x | 0x80;                                                }
-void ld_dt_vx  (params) {    DT = V[x];                                                               }
-void ld_st_vx  (params) {    ST = V[x];                                                               }
-void add_i_vx  (params) {    I += V[x];                                                               }
-void ld_f_vx   (params) {    I  = V[x] * 5;                                                           }
-void bcd       (params) {    mem[I] = V[x] / 100; mem[I+1] = (V[x] % 100) / 10; mem[I+2] = V[x] % 10; }
-void store_reg (params) {    for (int i=0; i<=x; i++) { mem[I + i] = V[i]; }                          }
-void read_reg  (params) {    for (int i=0; i<=x; i++) { V[i] = mem[I + i]; }                          }
-*/
-
-/*void (*f_table[9])    (params) = { ld_vx_dt, ld_vx_k, ld_dt_vx, ld_st_vx, add_i_vx, ld_f_vx, bcd, store_reg, read_reg };*/
-/*
-void f    (params)
-{
-  int i;
-  switch (kk)
-    { case 0x07: i=0; break; case 0x0a: i=1; break; case 0x15: i=2; break;
-      case 0x18: i=3; break; case 0x1e: i=4; break; case 0x29: i=5; break; 
-      case 0x33: i=6; break; case 0x55: i=7; break; case 0x65: i=8; break; }
-  f_table[i] (cpu, op, nnn, n, x, y, kk);
-}
-*/
